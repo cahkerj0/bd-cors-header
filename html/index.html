@@ -30,13 +30,13 @@
 <body>
 <main>
   <h1>Bot Defense <span>CORS</span> lab</h1>
-  <p class="sub">Frontend <code id="fe"></code> calling a cross-origin API. Point the API at nginx directly to see the failure, or at the BIG-IP VS (with the iRule) to see the fix.</p>
+  <p class="sub">Frontend <code id="fe"></code> calling a cross-origin API. Point the API at nginx (strict CORS) to see the failure, or at the BIG-IP VS with the iRule to see the fix.</p>
 
   <div class="card">
     <strong>API base URL</strong>
     <div class="row" style="margin-top:6px">
       <input type="text" id="api" spellcheck="false">
-      <button id="direct">nginx direct</button>
+      <button id="direct">Default</button>
     </div>
     <div class="err" id="apiErr"></div>
     <label class="toggle" style="margin-top:8px"><input type="checkbox" id="bd" checked> Simulated Bot Defense JS injected</label>
@@ -55,7 +55,10 @@
 </main>
 
 <script>
-const DIRECT = `${location.protocol}//${location.hostname}:8081`;
+// Default API: same host on :8081 when the page is opened directly on :8080,
+// otherwise the XC API load balancer.
+const XC_API = 'https://yohr.f5xc.cloud';
+const DIRECT = location.port === '8080' ? `${location.protocol}//${location.hostname}:8081` : XC_API;
 const apiInput = document.getElementById('api');
 apiInput.value = new URLSearchParams(location.search).get('api') || DIRECT;
 const apiBase = () => apiInput.value.trim().replace(/\/+$/, '');
