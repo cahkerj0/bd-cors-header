@@ -3,7 +3,7 @@ services:
     image: nginx:alpine
     container_name: bd-cors-lab
     ports:
-      - "8080:8080"   # test frontend (simulates yohr.yogyagroup.com)
+      - "8080:8080"   # test frontend (simulates yohr)
       - "8081:8081"   # backend API   (simulates yohr-api, pool member for BIG-IP)
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
