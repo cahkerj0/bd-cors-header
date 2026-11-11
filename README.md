@@ -24,7 +24,7 @@ browser sees two origins (CORS only applies cross-origin):
 
 | Lab | Simulates |
 |---|---|
-| `yohr-web.f5xc.cloud` → nginx :8080 | yohr.yogyagroup.com (frontend) |
+| `yohr-web.f5xc.cloud` → nginx :8080 | yohr(frontend) |
 | `yohr.f5xc.cloud` → nginx :8081 | yohr-api |
 
 The API keeps the **original** CORS policy
