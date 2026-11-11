@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot Defense CORS Lab</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --fg:#1d1d1b; --muted:#6b6b66; --ok:#1f7a4d; --bad:#b3261e; --warn:#9a6700; --line:#e3e3df; --accent:#e4002b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151514; --card:#1f1f1d; --fg:#ececea; --muted:#9a9a94; --line:#33332f; --ok:#5fd09a; --bad:#ff8a80; --warn:#f0c060; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:860px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; } h1 span { color:var(--accent); }
+  p.sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { font:inherit; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); cursor:pointer; }
+  button:hover { border-color:var(--fg); }
+  input[type=text] { font:13px ui-monospace, monospace; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); flex:1; min-width:220px; }
+  label.toggle { display:flex; gap:8px; align-items:center; font-weight:600; }
+  code { font:13px ui-monospace, monospace; }
+  .err { color:var(--bad); font-size:13px; min-height:1em; margin-top:4px; }
+  .test { display:grid; grid-template-columns:1fr auto; gap:6px 12px; padding:10px 0; border-top:1px solid var(--line); }
+  .test .exp { color:var(--muted); font-size:13px; grid-column:1/-1; }
+  .badge { font:12px ui-monospace, monospace; padding:2px 8px; border-radius:99px; border:1px solid currentColor; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  pre { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; max-height:280px; font:12px/1.45 ui-monospace, monospace; margin:0; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bot Defense <span>CORS</span> lab</h1>
+  <p class="sub">Frontend <code id="fe"></code> calling a cross-origin API. Point the API at nginx directly to see the failure, or at the BIG-IP VS (with the iRule) to see the fix.</p>
+
+  <div class="card">
+    <strong>API base URL</strong>
+    <div class="row" style="margin-top:6px">
+      <input type="text" id="api" spellcheck="false">
+      <button id="direct">nginx direct</button>
+    </div>
+    <div class="err" id="apiErr"></div>
+    <label class="toggle" style="margin-top:8px"><input type="checkbox" id="bd" checked> Simulated Bot Defense JS injected</label>
+    <p class="sub" style="margin:6px 0 0">When on, every fetch/XHR to the API gets <code>xa4vrhyp3q-*</code> headers, like the real injected JS. Suffixes are placeholders.</p>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:6px"><strong>Tests</strong><button id="all">Run all</button></div>
+    <div id="tests"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:8px"><strong>Log</strong><button id="clear">Clear</button></div>
+    <pre id="log">Open DevTools → Network to see the OPTIONS preflights.</pre>
+  </div>
+</main>
+
+<script>
+const DIRECT = `${location.protocol}//${location.hostname}:8081`;
+const apiInput = document.getElementById('api');
+apiInput.value = new URLSearchParams(location.search).get('api') || DIRECT;
+const apiBase = () => apiInput.value.trim().replace(/\/+$/, '');
+const bdOn = () => document.getElementById('bd').checked;
+const apiErr = document.getElementById('apiErr');
+apiInput.addEventListener('input', () => apiErr.textContent = '');
+document.getElementById('direct').onclick = () => { apiInput.value = DIRECT; apiErr.textContent = ''; };
+
+/* ---------- Simulated Bot Defense JS (hooks fetch + XHR) ---------- */
+const BD_PREFIX = 'xa4vrhyp3q-';
+const BD_SUFFIXES = ['a','b','c','d','f','z'];
+const rnd = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(24))));
+const isProtected = url => { try { return url.startsWith(apiBase()); } catch { return false; } };
+function telemetry() { const h = {}; BD_SUFFIXES.forEach(s => h[BD_PREFIX + s] = rnd()); return h; }
+
+const _fetch = window.fetch;
+window.fetch = (input, init = {}) => {
+  const url = typeof input === 'string' ? input : input.url;
+  if (bdOn() && isProtected(url)) {
+    const headers = new Headers(init.headers || {});
+    for (const [k, v] of Object.entries(telemetry())) headers.set(k, v);
+    init = { ...init, headers };
+  }
+  return _fetch(input, init);
+};
+const _open = XMLHttpRequest.prototype.open, _send = XMLHttpRequest.prototype.send;
+XMLHttpRequest.prototype.open = function (m, url, ...rest) { this._bdUrl = url; return _open.call(this, m, url, ...rest); };
+XMLHttpRequest.prototype.send = function (body) {
+  if (bdOn() && isProtected(this._bdUrl)) for (const [k, v] of Object.entries(telemetry())) this.setRequestHeader(k, v);
+  return _send.call(this, body);
+};
+
+/* ---------- Tests ---------- */
+const TESTS = [
+  { name: 'POST /api/login (fetch)', path: '/api/login',
+    exp: 'Direct + BD on → CORS error. Via VS with iRule → 200 and bd_header_seen filled. BD off → 200 either way.' },
+  { name: 'POST /api/profile (XHR)', path: '/api/profile', xhr: true,
+    exp: 'Same expectation, through XMLHttpRequest.' },
+];
+
+const log = msg => { const el = document.getElementById('log'); el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + el.textContent; };
+const setBadge = (el, cls, text) => { el.className = 'badge ' + cls; el.textContent = text; };
+
+function xhrPost(url, body) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', url); x.withCredentials = true;
+    x.setRequestHeader('Content-Type', 'application/json');
+    x.onload = () => resolve({ status: x.status, text: x.responseText });
+    x.onerror = () => reject(new TypeError('Network/CORS error'));
+    x.send(body);
+  });
+}
+
+function validApi() {
+  const v = apiBase();
+  if (!/^https?:\/\/[^\s/]+/.test(v)) { apiErr.textContent = 'Enter a URL like http://10.1.1.50 or http://host:8081'; return false; }
+  return true;
+}
+
+async function run(t, badge) {
+  if (!validApi()) return;
+  const url = apiBase() + t.path, body = JSON.stringify({ user: 'demo' });
+  const tag = `${t.name} → ${apiBase()} [BD ${bdOn() ? 'on' : 'off'}]`;
+  setBadge(badge, 'warn', '…');
+  try {
+    let r;
+    if (t.xhr) r = await xhrPost(url, body);
+    else { const res = await fetch(url, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body }); r = { status: res.status, text: await res.text() }; }
+    setBadge(badge, r.status < 400 ? 'ok' : 'bad', String(r.status));
+    log(`${tag} → ${r.status} ${r.text}`);
+  } catch (e) {
+    setBadge(badge, 'bad', 'CORS');
+    log(`${tag} → blocked by browser: ${e.message} (check the OPTIONS preflight)`);
+  }
+}
+
+const box = document.getElementById('tests');
+const runners = TESTS.map(t => {
+  const row = document.createElement('div'); row.className = 'test';
+  row.innerHTML = `<div class="row"><button>Run</button><code>${t.name}</code></div><span class="badge">–</span><div class="exp">${t.exp}</div>`;
+  const badge = row.querySelector('.badge');
+  const go = () => run(t, badge);
+  row.querySelector('button').onclick = go;
+  box.appendChild(row); return go;
+});
+document.getElementById('all').onclick = async () => { if (!validApi()) return; for (const go of runners) await go(); };
+document.getElementById('clear').onclick = () => document.getElementById('log').textContent = '';
+document.getElementById('fe').textContent = location.origin;
+</script>
+</body>
+</html>
